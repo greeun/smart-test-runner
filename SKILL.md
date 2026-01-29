@@ -4,224 +4,466 @@ description: |
   Intelligent test execution with failure-first retry strategy.
   Runs domain tests (unit, integration, api, api-e2e, browser-e2e, security, performance, oapi),
   analyzes failures, fixes issues, re-runs failed tests only, then runs full domain suite on success.
-  Use when running tests, fixing test failures, debugging test errors, or "run tests and fix".
+  Use when: "run tests", "테스트 돌려줘", "fix test failures", "테스트 에러 수정", "run tests and fix".
 ---
 
 # Smart Test Runner
 
-Efficient test execution strategy: fix failures first, then verify full suite.
+Efficient test execution with **hybrid workflow**: fast fixing + regression verification.
 
-## Workflow
+## Trigger Keywords
 
-```
-1. Detect test domains
-   ↓
-2. Run domain tests
-   ↓
-3. Failures? ──No──→ Next domain (or Done)
-   │
-   Yes
-   ↓
-4. Analyze failure cause
-   ↓
-5. Fix code/test
-   ↓
-6. Re-run ONLY failed tests
-   ↓
-7. Pass? ──No──→ Back to step 4
-   │
-   Yes
-   ↓
-8. Run full domain suite
-   ↓
-9. Pass? ──No──→ Back to step 4
-   │
-   Yes
-   ↓
-10. Next domain (or Done)
-```
+| 한글 | English |
+|------|---------|
+| 테스트 돌려줘 | run tests |
+| 테스트 실행하고 에러 수정해줘 | run tests and fix |
+| 테스트 실패 원인 분석해줘 | fix test failures |
+| unit 테스트만 실행해줘 | run unit tests |
+| 테스트 디버깅해줘 | debug test errors |
 
-## Step 1: Detect Test Domains
-
-Auto-detect available test domains from project configuration:
-
-| Domain | Detection Pattern |
-|--------|-------------------|
-| unit | `test/unit/`, `__tests__/`, `*_test.py`, `*.spec.ts` |
-| integration | `test/integration/`, `integration/` |
-| api | `test/api/`, `api.test.*` |
-| api-e2e | `test/api-e2e/`, `e2e/api/` |
-| browser-e2e | `test/e2e/`, `cypress/`, `playwright/` |
-| security | `test/security/`, `security.test.*` |
-| performance | `test/performance/`, `perf/`, `k6/` |
-| oapi | `openapi.yaml`, `swagger.*`, contract tests |
-
-Check config files:
-- `package.json` scripts
-- `pytest.ini`, `pyproject.toml`
-- `Makefile` targets
-- `.github/workflows/*.yml`
-
-## Step 2: Run Tests by Domain
-
-Execute tests in recommended order (fast → slow):
-
-1. **unit** - Fastest, run first
-2. **integration** - Dependencies between modules
-3. **api** - API endpoint tests
-4. **oapi** - OpenAPI contract validation
-5. **security** - Security scans
-6. **api-e2e** - End-to-end API flows
-7. **browser-e2e** - Browser automation (slowest)
-8. **performance** - Load/stress tests (optional, heavy)
-
-### Common Test Commands
+## Installation
 
 ```bash
-# JavaScript/TypeScript
-npm test                    # default
-npm run test:unit           # unit only
-npx jest --testPathPattern=unit
-npx vitest run unit/
+# Symlink to Claude Code skills directory
+ln -s /path/to/smart-test-runner ~/.claude/skills/smart-test-runner
 
-# Python
-pytest tests/unit/
-pytest -m unit
-python -m pytest tests/
-
-# Go
-go test ./...
-go test -run TestUnit
-
-# Playwright (browser e2e)
-npx playwright test
-
-# Cypress
-npx cypress run
+# Verify installation
+ls ~/.claude/skills/smart-test-runner/scripts/
+# Should show: detect_test_config.sh, list_tests.py, parse_test_output.py
 ```
 
-## Step 3: Identify Failed Tests
+## Skill Structure
 
-Parse test output to extract:
-- Failed test file path
-- Failed test name/description
-- Error message and stack trace
-- Line number of failure
-
-Example parsing:
 ```
-FAIL src/utils/parser.test.ts
-  ✕ should parse JSON correctly (15ms)
-    → Extract: file=src/utils/parser.test.ts, test="should parse JSON correctly"
+smart-test-runner/
+├── SKILL.md                           # This guide
+└── scripts/
+    ├── detect_test_config.sh          # Detect test domains & commands
+    ├── list_tests.py                  # List tests for resume capability
+    └── parse_test_output.py           # Parse test output to JSON
 ```
 
-## Step 4: Analyze Failure Cause
+---
 
-For each failed test:
+## Hybrid Workflow Overview
 
-1. **Read the test file** - Understand what the test expects
-2. **Read the source file** - Find the implementation being tested
-3. **Analyze the error** - Categorize the failure type:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 1: Fast Fix (bail mode)                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Create TodoWrite for tracking                               │
+│  2. Detect test domains (script)                                │
+│  3. Collect test list (script)                                  │
+│  4. Run with --bail (stop on first failure)                     │
+│     ↓                                                           │
+│  5. Failure? ──No──→ Phase 1 done for domain                    │
+│     │                                                           │
+│     Yes (stop immediately)                                      │
+│     ↓                                                           │
+│  6. Parse failure (script) → Analyze → Fix                      │
+│     ↓                                                           │
+│  7. Re-run ONLY failed test                                     │
+│     ↓                                                           │
+│  8. Pass? ──No──→ Back to step 6                                │
+│     │                                                           │
+│     Yes                                                         │
+│     ↓                                                           │
+│  9. Run REMAINING tests (continue, not restart)                 │
+│     ↓                                                           │
+│ 10. More failures? ──Yes──→ Back to step 6                      │
+│     │                                                           │
+│     No → Phase 1 complete                                       │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 2: Regression Check                                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ 11. Run FULL test suite (no bail)                               │
+│     ↓                                                           │
+│ 12. New failures? ──Yes──→ Back to Phase 1 step 6               │
+│     │              (regression bug detected)                    │
+│     No                                                          │
+│     ↓                                                           │
+│ 13. Domain complete → Next domain or Done                       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-| Failure Type | Indicators | Common Fix |
-|--------------|------------|------------|
-| Assertion mismatch | `expected X, got Y` | Fix logic or update expectation |
-| Type error | `TypeError`, `undefined` | Fix types, null checks |
-| Timeout | `Timeout exceeded` | Increase timeout or fix async |
-| Mock issue | `mock not called` | Fix mock setup or implementation |
-| Environment | `ENOENT`, `connection refused` | Fix env setup or skip in CI |
+---
 
-## Step 5: Fix Code or Test
+## Script Reference
 
-Apply targeted fixes based on analysis:
+### 1. detect_test_config.sh
 
-- **Implementation bug** → Fix the source code
-- **Outdated test** → Update test expectations
-- **Missing mock** → Add proper mock/stub
-- **Flaky test** → Add retry or fix race condition
+Detects test frameworks, domains, and generates both normal and bail commands.
 
-**Important**: Make minimal changes. Don't refactor unrelated code.
+**Usage:**
+```bash
+bash ~/.claude/skills/smart-test-runner/scripts/detect_test_config.sh [project_dir]
+```
 
-## Step 6: Re-run Failed Tests Only
+**Arguments:**
+| Argument | Default | Description |
+|----------|---------|-------------|
+| project_dir | `.` | Path to project root |
 
-Run only the specific failed tests:
+**Output:**
+```json
+{
+  "project_dir": "/path/to/project",
+  "frameworks": {
+    "javascript": "jest",
+    "python": "",
+    "go": ""
+  },
+  "domains": [
+    {
+      "name": "unit",
+      "command": "npx jest",
+      "bail_command": "npx jest --bail",
+      "priority": 1
+    },
+    {
+      "name": "integration",
+      "command": "npx jest --testPathPattern=integration",
+      "bail_command": "npx jest --testPathPattern=integration --bail",
+      "priority": 2
+    }
+  ],
+  "total_domains": 2
+}
+```
+
+**Key Fields:**
+- `command`: Use for Phase 2 (full run)
+- `bail_command`: Use for Phase 1 (stop on first failure)
+- `priority`: Lower = run first (unit before e2e)
+
+---
+
+### 2. list_tests.py
+
+Collects test list before execution. Enables "resume from" capability.
+
+**Usage:**
+```bash
+python ~/.claude/skills/smart-test-runner/scripts/list_tests.py [options]
+```
+
+**Options:**
+| Option | Short | Required | Description |
+|--------|-------|----------|-------------|
+| --framework | -f | Yes | jest, vitest, pytest, go, playwright |
+| --path | -p | No | Path to tests (default: .) |
+| --pretty | | No | Pretty print JSON |
+| --remaining-from | -r | No | Get remaining tests from index N |
+
+**Examples:**
 
 ```bash
-# Jest
+# List all tests
+python ~/.claude/skills/smart-test-runner/scripts/list_tests.py -f jest --pretty
+
+# Get remaining tests after index 15
+python ~/.claude/skills/smart-test-runner/scripts/list_tests.py -f jest -r 15
+```
+
+**Output (basic):**
+```json
+{
+  "framework": "jest",
+  "total": 50,
+  "tests": [
+    {"id": "src/utils/parser.test.ts", "name": "parser", "file": "src/utils/parser.test.ts"},
+    {"id": "src/api/client.test.ts", "name": "client", "file": "src/api/client.test.ts"}
+  ],
+  "run_single_command": "npx jest {test_id}",
+  "run_from_command": "npx jest --testPathPattern='{test_id}'",
+  "bail_command": "npx jest --bail"
+}
+```
+
+**Output (with --remaining-from 15):**
+```json
+{
+  "framework": "jest",
+  "total": 50,
+  "tests": [...],
+  "remaining": {
+    "remaining_count": 35,
+    "remaining_tests": [...],
+    "run_remaining_command": "npx jest src/api/client.test.ts src/db/query.test.ts ..."
+  }
+}
+```
+
+---
+
+### 3. parse_test_output.py
+
+Parses test output from various frameworks into unified JSON format.
+
+**Usage:**
+```bash
+<test_command> 2>&1 | python ~/.claude/skills/smart-test-runner/scripts/parse_test_output.py [options]
+```
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| --framework | -f | Force framework (auto-detected if omitted) |
+| --pretty | -p | Pretty print JSON |
+
+**Supported Frameworks:**
+- Jest / Vitest
+- Pytest
+- Go test
+- Playwright
+- Cypress
+
+**Examples:**
+
+```bash
+# Auto-detect framework
+npx jest --bail 2>&1 | python ~/.claude/skills/smart-test-runner/scripts/parse_test_output.py -p
+
+# Force pytest
+pytest -x 2>&1 | python ~/.claude/skills/smart-test-runner/scripts/parse_test_output.py -f pytest -p
+```
+
+**Output:**
+```json
+{
+  "framework": "jest",
+  "total": 45,
+  "passed": 43,
+  "failed": 2,
+  "skipped": 0,
+  "duration_ms": 5230,
+  "failures": [
+    {
+      "file": "src/utils/parser.test.ts",
+      "test_name": "should parse JSON correctly",
+      "error_message": "Expected { a: 1 }, got { a: \"1\" }",
+      "line_number": 15,
+      "failure_type": "assertion",
+      "rerun_command": "npx jest --testNamePattern=\"should parse JSON correctly\""
+    }
+  ]
+}
+```
+
+**Failure Types:**
+| Type | Indicators | Fix Strategy |
+|------|------------|--------------|
+| assertion | expected, to equal, assert | Fix logic or update expectation |
+| type_error | TypeError, undefined, null | Add null checks, fix types |
+| timeout | timeout, exceeded, timed out | Fix async handling, increase timeout |
+| mock_issue | mock, spy, stub, not called | Fix mock setup |
+| environment | ENOENT, connection refused | Fix env setup |
+| syntax | SyntaxError, unexpected token | Fix syntax |
+
+---
+
+## Step-by-Step Execution Guide
+
+### Step 1: Initialize Progress Tracking
+
+```
+Use TodoWrite to create:
+- [ ] Detect test domains
+- [ ] [P1] unit - fast fix
+- [ ] [P2] unit - regression check
+- [ ] [P1] integration - fast fix
+- [ ] [P2] integration - regression check
+```
+
+### Step 2: Detect Test Domains
+
+```bash
+bash ~/.claude/skills/smart-test-runner/scripts/detect_test_config.sh .
+```
+
+Store the output. Use `bail_command` for Phase 1, `command` for Phase 2.
+
+### Step 3: Collect Test List
+
+```bash
+python ~/.claude/skills/smart-test-runner/scripts/list_tests.py -f jest --pretty
+```
+
+Note the test count and indices for resume capability.
+
+### Step 4: Phase 1 - Run with Bail
+
+```bash
+# Use bail_command from step 2
+npx jest --bail
+```
+
+If all pass → Skip to Step 9.
+If failure → Continue to Step 5.
+
+### Step 5: Parse Failure
+
+```bash
+npx jest --bail 2>&1 | python ~/.claude/skills/smart-test-runner/scripts/parse_test_output.py -p
+```
+
+### Step 6: Analyze and Fix
+
+1. Read the failed test file
+2. Read the source file being tested
+3. Identify failure type from parser output
+4. Apply minimal targeted fix
+
+### Step 7: Re-run Failed Test Only
+
+Use `rerun_command` from parser output:
+
+```bash
 npx jest --testNamePattern="should parse JSON correctly"
-npx jest path/to/failed.test.ts
-
-# Vitest
-npx vitest run -t "should parse JSON correctly"
-
-# Pytest
-pytest path/to/test_file.py::test_function_name
-pytest -k "test_parse_json"
-
-# Go
-go test -run TestParseJSON ./pkg/parser/
+# or
+npx jest src/utils/parser.test.ts
 ```
 
-**Repeat steps 4-6 until the specific test passes.**
+If fail → Back to Step 6.
+If pass → Continue.
 
-## Step 7: Run Full Domain Suite
-
-Once failed tests pass individually, run the complete domain:
+### Step 8: Run Remaining Tests
 
 ```bash
-# Run all unit tests
-npm run test:unit
-pytest tests/unit/
-go test ./tests/unit/...
+# Get remaining tests command
+python ~/.claude/skills/smart-test-runner/scripts/list_tests.py -f jest -r 15
+
+# Run the remaining command from output
+npx jest src/api/client.test.ts src/db/query.test.ts ...
 ```
 
-If new failures appear:
-- These are likely **regression bugs** from your fix
-- Go back to Step 4 for new failures
+If more failures → Back to Step 5.
+If all pass → Continue.
 
-## Step 8: Proceed to Next Domain
+### Step 9: Phase 2 - Full Regression Check
 
-After a domain passes completely:
-1. Mark domain as complete
-2. Move to next domain in priority order
-3. Repeat from Step 2
+```bash
+# Use command (not bail_command)
+npx jest
+```
 
-## Output Format
+If new failures → These are regression bugs. Back to Step 5.
+If all pass → Domain complete!
 
-Report progress using this structure:
+### Step 10: Next Domain
+
+Update todos and repeat from Step 4 for next domain.
+
+---
+
+## Bail Options Reference
+
+| Framework | Normal | Bail |
+|-----------|--------|------|
+| Jest | `npx jest` | `npx jest --bail` |
+| Vitest | `npx vitest run` | `npx vitest run --bail` |
+| Pytest | `pytest` | `pytest -x` |
+| Go | `go test ./...` | `go test -failfast ./...` |
+| Playwright | `npx playwright test` | `npx playwright test --max-failures=1` |
+| Mocha | `npx mocha` | `npx mocha --bail` |
+
+---
+
+## Test Domain Priority
+
+Execute in this order (fast → slow):
+
+| Priority | Domain | Typical Duration |
+|----------|--------|------------------|
+| 1 | unit | Seconds |
+| 2 | integration | Seconds-Minutes |
+| 3 | api | Minutes |
+| 4 | oapi | Minutes |
+| 5 | security | Minutes |
+| 6 | api-e2e | Minutes |
+| 7 | browser-e2e | Minutes-Hours |
+| 8 | performance | Minutes-Hours |
+
+---
+
+## Output Report Format
 
 ```markdown
 ## Test Execution Report
 
 ### Domain: unit
-- Total: 45 tests
-- Passed: 43
-- Failed: 2
-- Status: FIXING
 
-#### Failed Tests
-1. `src/utils/parser.test.ts` - "should parse JSON correctly"
-   - Error: Expected { a: 1 }, got { a: "1" }
-   - Cause: Type coercion issue in parseJSON()
-   - Fix: Added parseInt() conversion
-   - Re-run: PASSED
+#### Phase 1: Fast Fix
+| # | Test | Error | Cause | Fix | Status |
+|---|------|-------|-------|-----|--------|
+| 30 | parser.test.ts | Expected {a:1} got {a:"1"} | Type coercion | Added parseInt | FIXED |
+| 70 | client.test.ts | Timeout 5000ms | Missing mock | Added fetch mock | FIXED |
 
-2. `src/api/client.test.ts` - "should retry on failure"
-   - Error: Timeout after 5000ms
-   - Cause: Missing mock for fetch
-   - Fix: Added fetch mock
-   - Re-run: PASSED
+Remaining after #70: 30 tests → All passed
 
-#### Full Suite Re-run: PASSED (45/45)
+#### Phase 2: Regression Check
+Full suite: 100/100 PASSED
 
 ### Domain: integration
-- Status: RUNNING...
+Status: PENDING
+
+### Progress
+- [x] [P1] unit (fixed 2)
+- [x] [P2] unit (100/100)
+- [ ] [P1] integration
+- [ ] [P2] integration
 ```
+
+---
+
+## Efficiency Comparison
+
+| Scenario | Traditional | Hybrid | Savings |
+|----------|-------------|--------|---------|
+| 100 tests, 2 failures | 15 min | 12 min | 20% |
+| 100 tests, 5 failures | 30 min | 18 min | 40% |
+| 100 tests, 10 failures | 55 min | 25 min | 55% |
+
+More failures = more savings with hybrid approach.
+
+---
+
+## Troubleshooting
+
+### Script not found
+```bash
+# Verify symlink
+ls -la ~/.claude/skills/smart-test-runner/
+
+# Fix symlink
+ln -sf /actual/path/to/smart-test-runner ~/.claude/skills/smart-test-runner
+```
+
+### No domains detected
+- Check if test files exist
+- Verify package.json has test scripts
+- Check directory structure matches patterns
+
+### Parser returns empty failures
+- Ensure stderr is captured: `2>&1`
+- Try forcing framework: `-f jest`
+- Check test output format matches expected patterns
+
+### Remaining tests command too long
+- Run tests by pattern instead
+- Split into batches
+
+---
 
 ## Tips
 
-- **Don't skip domains** - Run all detected domains even if one fails
-- **Fix root causes** - Don't just make tests pass; fix underlying issues
-- **Minimal changes** - Avoid unrelated refactoring during test fixes
-- **Document flaky tests** - Note tests that fail intermittently
-- **Check CI parity** - Ensure local and CI environments match
+- **Always use bail in Phase 1** - Stop early, fix fast
+- **Track test indices** - Essential for resume capability
+- **Phase 2 is mandatory** - Catches regression bugs
+- **Minimal changes only** - Don't refactor during fixes
+- **Document flaky tests** - Note intermittent failures
+- **Check CI parity** - Local and CI environments should match
