@@ -43,9 +43,9 @@ def list_jest_tests(path: str = ".") -> TestList:
     # Try vitest first, then jest
     for runner in ["vitest", "jest"]:
         try:
-            cmd = f"npx {runner} --listTests --json"
+            cmd = ["npx", runner, "--listTests", "--json"]
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, cwd=path, timeout=60
+                cmd, capture_output=True, text=True, cwd=path, timeout=60
             )
             if result.returncode == 0:
                 # Parse JSON output
@@ -100,9 +100,9 @@ def list_jest_tests(path: str = ".") -> TestList:
 def list_pytest_tests(path: str = ".") -> TestList:
     """List pytest tests using --collect-only."""
     try:
-        cmd = f"pytest --collect-only -q {path}"
+        cmd = ["pytest", "--collect-only", "-q", path]
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=120
+            cmd, capture_output=True, text=True, timeout=120
         )
 
         tests = []
@@ -143,9 +143,9 @@ def list_pytest_tests(path: str = ".") -> TestList:
 def list_go_tests(path: str = "./...") -> TestList:
     """List Go tests using go test -list."""
     try:
-        cmd = f"go test -list '.*' {path}"
+        cmd = ["go", "test", "-list", ".*", path]
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=60
+            cmd, capture_output=True, text=True, timeout=60
         )
 
         tests = []
@@ -188,9 +188,9 @@ def list_go_tests(path: str = "./...") -> TestList:
 def list_playwright_tests(path: str = ".") -> TestList:
     """List Playwright tests using --list."""
     try:
-        cmd = "npx playwright test --list"
+        cmd = ["npx", "playwright", "test", "--list"]
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=path, timeout=60
+            cmd, capture_output=True, text=True, cwd=path, timeout=60
         )
 
         tests = []
