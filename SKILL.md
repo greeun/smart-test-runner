@@ -257,12 +257,12 @@ pytest -x 2>&1 | python ~/.claude/skills/smart-test-runner/scripts/parse_test_ou
 **Failure Types:**
 | Type | Indicators | Fix Strategy |
 |------|------------|--------------|
-| assertion | expected, to equal, assert | Fix logic or update expectation |
-| type_error | TypeError, undefined, null | Add null checks, fix types |
-| timeout | timeout, exceeded, timed out | Fix async handling, increase timeout |
-| mock_issue | mock, spy, stub, not called | Fix mock setup |
+| assertion | expected, to equal, assert | **Triage first** (see Step 6) |
+| type_error | TypeError, undefined, null | **Triage first** (see Step 6) |
+| timeout | timeout, exceeded, timed out | **Triage first** (see Step 6) |
+| mock_issue | mock, spy, stub, not called | **Triage first** (see Step 6) |
 | environment | ENOENT, connection refused | Fix env setup |
-| syntax | SyntaxError, unexpected token | Fix syntax |
+| syntax | SyntaxError, unexpected token | Fix syntax in the file that has it |
 
 ---
 
@@ -311,12 +311,35 @@ If failure → Continue to Step 5.
 npx jest --bail 2>&1 | python ~/.claude/skills/smart-test-runner/scripts/parse_test_output.py -p
 ```
 
-### Step 6: Analyze and Fix
+### Step 6: Root Cause Triage → Fix
 
-1. Read the failed test file
-2. Read the source file being tested
+**DEFAULT ASSUMPTION: The implementation code has a bug.**
+Only modify test code when you can explicitly justify WHY the test is wrong.
+
+```
+┌─ Was the test previously passing? (check git log/blame)
+│   ├─ Yes → Implementation likely broke it. Fix IMPLEMENTATION.
+│   └─ No / New test → Analyze further below.
+│
+├─ Does the test assert correct business logic/spec?
+│   ├─ Yes → Fix IMPLEMENTATION to match the spec.
+│   └─ No (outdated expectation, wrong assertion) → Fix TEST.
+│
+├─ Was implementation recently changed?
+│   ├─ Yes → Regression bug. Fix IMPLEMENTATION.
+│   └─ No → Likely test environment or test logic issue.
+│
+└─ Is the test testing mock behavior instead of real behavior?
+    ├─ Yes → Fix TEST (anti-pattern).
+    └─ No → Fix IMPLEMENTATION.
+```
+
+**Procedure:**
+1. Read the failed test file AND the source file being tested
+2. Determine root cause using the triage tree above
 3. Identify failure type from parser output
-4. Apply minimal targeted fix
+4. Fix the correct target (implementation or test) with minimal change
+5. **Document your triage decision** in the report (why you chose to fix impl vs test)
 
 ### Step 7: Re-run Failed Test Only
 
@@ -398,10 +421,10 @@ Execute in this order (fast → slow):
 ### Domain: unit
 
 #### Phase 1: Fast Fix
-| # | Test | Error | Cause | Fix | Status |
-|---|------|-------|-------|-----|--------|
-| 30 | parser.test.ts | Expected {a:1} got {a:"1"} | Type coercion | Added parseInt | FIXED |
-| 70 | client.test.ts | Timeout 5000ms | Missing mock | Added fetch mock | FIXED |
+| # | Test | Error | Root Cause | Fixed Target | Fix | Status |
+|---|------|-------|------------|--------------|-----|--------|
+| 30 | parser.test.ts | Expected {a:1} got {a:"1"} | Type coercion in parser | **IMPL** parser.ts | Added parseInt | FIXED |
+| 70 | client.test.ts | Timeout 5000ms | Async handler missing await | **IMPL** client.ts | Added await | FIXED |
 
 Remaining after #70: 30 tests → All passed
 
